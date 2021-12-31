@@ -12,37 +12,68 @@ md"""# Project: Genetic Programming for Regression"""
 
 # ╔═╡ 94e88596-464d-41e7-a0da-68fc69f4e9c6
 md"""## The concept
-Explore the `SymbolicRegression` package for a regression problem and compare with other known regression methods: random forests and lasso?
-
-Initial exploration of the data has shown that there 
+Apply the `SymbolicRegression` package for a regression problem and compare with other known regression methods: random forests and lasso? 
 """
 
+# ╔═╡ cc166935-f9a3-4b8e-b953-d97034e45dca
+md"Read in data set"
+
 # ╔═╡ 4ec5675e-a40b-4f12-bffc-9c6aeeebf7c0
-dataset = DataFrame(CSV.File("moodsData.csv"; header=1, delim=";"))
+dataset = DataFrame(CSV.File("moodsData.csv"; header=1, delim=";"));
+
+# ╔═╡ d09fa8c4-c19d-4e5f-9d5f-c7831ec3762b
+md"## Explore and prepare data set"
+
+# ╔═╡ ee67a2b5-8cb8-427f-9f38-286671c6b482
+md"#### The response variables"
+
+# ╔═╡ 5e762872-22a7-40aa-ae5a-441fdbcf462e
+md"First, let's take a look the response variables:\
+(note that this data set is a time series)"
 
 # ╔═╡ 13af064b-9abc-4c8e-9ada-831910ced6fb
 response = dataset[:,vcat(2:9)]
 
+# ╔═╡ b001aa84-527b-4ccd-96aa-8c4c9434870a
+respNames = names(response);
+
+# ╔═╡ 370172dc-15b3-490b-aa69-eb61d4272344
+md"Let's look at a plot that visualizes the correlations between the variables"
+
 # ╔═╡ 1b159d85-f073-4c0a-ab88-1ba7b54eae3b
-heatmap(cor(Array(response)), color=:bluesreds)
+heatmap(respNames, respNames, cor(Array(response)), color=:bluesreds, title="Correlation plot response variables")
 
-# ╔═╡ 472f5591-90fd-4292-8eeb-edc67a439087
-y = Matrix(Matrix{Float64}(dataset[:,vcat(2:9)])')
+# ╔═╡ 2872be01-1202-4cbc-8fe0-19da723b5848
+md"It seems like most of these variables are correlated to each other, with the exception of `emotionality`"
 
-# ╔═╡ ca4cc713-4bfd-4a15-82d3-29553ffe89aa
-X = Matrix(Matrix{Float64}(dataset[:,vcat(2:6,8:9)])')
+# ╔═╡ 1d0c8ca3-6eeb-4fcb-b813-112895aa7103
+md"Let's simplify the response variables by collapsing all variables except `emotionality` together into a single variable: `wellbeing`
 
-# ╔═╡ 4c5dbf7d-c487-4351-979b-e26dc4ee7d90
-variableNames = names(dataset[:,vcat(2,4:6,8:9)])
+PCA is used to do this:"
+
+# ╔═╡ e5327245-9eed-44a8-af67-aca7160ac3a9
+wellbeingOriginal = Matrix{Float64}(dataset[:,vcat(2:6,8:9)])';
 
 # ╔═╡ 8ed46b21-3cd3-4f95-956f-0c1498273e11
-M = fit(PCA, X; maxoutdim=1)
+M = fit(PCA, wellbeingOriginal; maxoutdim=1);
 
 # ╔═╡ 43a4f4a1-2fa3-4eaf-bbae-7c484d0a6ee0
-wellbeing = MultivariateStats.transform(M,X)'[:,1]
+wellbeing = MultivariateStats.transform(M, wellbeingOriginal)'[:,1];
 
-# ╔═╡ 426d0040-148d-4002-a519-b83fb295446e
-histogram(wellbeing)
+# ╔═╡ 82a567c0-ee21-4e5c-a079-736cf5a9493a
+md"The `wellbeing` variable explains $(round(principalratio(M)*100)) % of the variance of all 7 original variables. We conclude that `wellbeing` is a decent representation of the original variables."
+
+# ╔═╡ 8e9f1328-8a8e-4629-8004-8efd31429b69
+md"The second response variable to investigate is `emotionality`"
+
+# ╔═╡ 98bcdc51-cbba-409d-9fe2-6b9acf94c279
+emotionality = Array{Float64}(dataset[:,7]);
+
+# ╔═╡ b4c01050-247f-4b7a-a08c-aace0ba29b71
+md"#### The predictor variables"
+
+# ╔═╡ 321bc3e8-9d5e-439b-8051-9650e44d2268
+predictor = dataset[:,11:end]
 
 # ╔═╡ 99a68eb2-c058-4224-95d8-83edc893ac5f
 #y = Vector{Float64}(dataset[:,3])
@@ -55,7 +86,7 @@ options = SymbolicRegression.Options(
 )
 
 # ╔═╡ d6c8df62-2afa-4f6f-9516-cc613a588fbe
-#hallOfFame = EquationSearch(X, y, niterations=15, varMap=variableNames, options=options, numprocs=0)
+#hallOfFame = EquationSearch(X, y, niterations=2, varMap=variableNames, options=options, numprocs=0)
 
 # ╔═╡ 09c0929b-184c-4c03-b5cb-954d58a4eee6
 dominating = calculateParetoFrontier(X, y, hallOfFame, options)
@@ -68,13 +99,21 @@ y_pred = [4.331889 + 0.6692549*dataset[i,5] + (-1.0183419*dataset[i,5]) / (datas
 
 # ╔═╡ 5814d9d8-8325-469b-b68e-1944ddbef429
 function smooth(dataPoints; smoothness=10)
-	return [sum(dataPoints[i:i+smoothness])/smoothness for i in 1:(length(dataPoints)-smoothness)]
+	return [sum(dataPoints[i:i+smoothness-1])/smoothness for i in 1:(length(dataPoints)-smoothness+1)]
 end
 
 # ╔═╡ 5afac8d7-d2e1-4ec9-b644-7730a760c154
 begin
-	sm = 21
-	plot(smooth(1:length(wellbeing), smoothness=sm),smooth(wellbeing, smoothness=sm))
+	sm = 7
+	plot(1:(length(wellbeing)-sm+1),smooth(wellbeing, smoothness=sm))
+	plot!(1:(length(emotionality)-sm+1),(smooth(emotionality, smoothness=sm).-10).*2)
+end
+
+# ╔═╡ 938a9c33-f83c-4080-bd2b-6773fed1a86e
+begin
+	smt = 30
+	plot(1:(length(meditation)-smt+1),(smooth(meditation, smoothness=smt).-1).*5)
+	plot!(1:(length(wellbeing)-smt+1),smooth(wellbeing, smoothness=smt))
 end
 
 # ╔═╡ da0f15f3-a18b-41e3-97df-2b0589c72799
@@ -1142,18 +1181,29 @@ version = "3.5.0+0"
 
 # ╔═╡ Cell order:
 # ╟─ecfd3b68-0f66-4695-87a3-404eafad37bc
-# ╠═94e88596-464d-41e7-a0da-68fc69f4e9c6
+# ╟─94e88596-464d-41e7-a0da-68fc69f4e9c6
 # ╠═5f9b5d30-68cb-11ec-2e1e-aff540c73252
+# ╟─cc166935-f9a3-4b8e-b953-d97034e45dca
 # ╠═4ec5675e-a40b-4f12-bffc-9c6aeeebf7c0
+# ╟─d09fa8c4-c19d-4e5f-9d5f-c7831ec3762b
+# ╟─ee67a2b5-8cb8-427f-9f38-286671c6b482
+# ╟─5e762872-22a7-40aa-ae5a-441fdbcf462e
 # ╠═13af064b-9abc-4c8e-9ada-831910ced6fb
-# ╠═1b159d85-f073-4c0a-ab88-1ba7b54eae3b
-# ╠═472f5591-90fd-4292-8eeb-edc67a439087
-# ╠═ca4cc713-4bfd-4a15-82d3-29553ffe89aa
-# ╠═4c5dbf7d-c487-4351-979b-e26dc4ee7d90
+# ╠═b001aa84-527b-4ccd-96aa-8c4c9434870a
+# ╟─370172dc-15b3-490b-aa69-eb61d4272344
+# ╟─1b159d85-f073-4c0a-ab88-1ba7b54eae3b
+# ╟─2872be01-1202-4cbc-8fe0-19da723b5848
+# ╟─1d0c8ca3-6eeb-4fcb-b813-112895aa7103
+# ╠═e5327245-9eed-44a8-af67-aca7160ac3a9
 # ╠═8ed46b21-3cd3-4f95-956f-0c1498273e11
 # ╠═43a4f4a1-2fa3-4eaf-bbae-7c484d0a6ee0
-# ╠═426d0040-148d-4002-a519-b83fb295446e
+# ╟─82a567c0-ee21-4e5c-a079-736cf5a9493a
+# ╟─8e9f1328-8a8e-4629-8004-8efd31429b69
+# ╠═98bcdc51-cbba-409d-9fe2-6b9acf94c279
 # ╠═5afac8d7-d2e1-4ec9-b644-7730a760c154
+# ╟─b4c01050-247f-4b7a-a08c-aace0ba29b71
+# ╠═321bc3e8-9d5e-439b-8051-9650e44d2268
+# ╠═938a9c33-f83c-4080-bd2b-6773fed1a86e
 # ╠═99a68eb2-c058-4224-95d8-83edc893ac5f
 # ╠═4d13d667-01b7-4dd9-abcf-6214b87c26db
 # ╠═d6c8df62-2afa-4f6f-9516-cc613a588fbe
