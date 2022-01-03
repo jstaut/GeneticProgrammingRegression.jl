@@ -12,7 +12,9 @@ md"""# Project: Genetic Programming for Regression"""
 
 # ╔═╡ 94e88596-464d-41e7-a0da-68fc69f4e9c6
 md"""## The concept
-Apply the `SymbolicRegression` package for a regression problem and compare with other known regression methods: random forests and lasso? 
+Apply the `SymbolicRegression` package for a regression problem and compare with other known regression methods: random forests?
+
+Dive deeper and explain the way the package works
 """
 
 # ╔═╡ cc166935-f9a3-4b8e-b953-d97034e45dca
@@ -75,52 +77,91 @@ md"#### The predictor variables"
 # ╔═╡ 321bc3e8-9d5e-439b-8051-9650e44d2268
 predictor = dataset[:,11:end]
 
-# ╔═╡ 99a68eb2-c058-4224-95d8-83edc893ac5f
-#y = Vector{Float64}(dataset[:,3])
+# ╔═╡ d4f5845d-5f93-4128-b786-e8f48ca1bed3
+md"Crop data set to remove data points with missing value for `exercise`"
+
+# ╔═╡ f4ec23bb-423e-4253-9f27-11d79577fb1b
+predictor_cropped = predictor[sum(predictor[:,"exercise"].===missing)+1:end,:];
+
+# ╔═╡ 0782f22f-abd5-4600-93d8-351b7e66e46a
+md"Create some derived variables by aggregating info on past data points"
+
+# ╔═╡ 0ca328af-ae2a-4784-91ea-2abb4bda988a
+md"Also crop the response variables to match the predictor data" 
+
+# ╔═╡ 97fa1a98-6473-4317-b1bc-b1edf5e76504
+md"## The analysis"
 
 # ╔═╡ 4d13d667-01b7-4dd9-abcf-6214b87c26db
 options = SymbolicRegression.Options(
     binary_operators=(+, *, /, -),
     unary_operators=tuple(),
-    npopulations=5
+    npopulations=2
 )
 
-# ╔═╡ d6c8df62-2afa-4f6f-9516-cc613a588fbe
-#hallOfFame = EquationSearch(X, y, niterations=2, varMap=variableNames, options=options, numprocs=0)
-
-# ╔═╡ 09c0929b-184c-4c03-b5cb-954d58a4eee6
-dominating = calculateParetoFrontier(X, y, hallOfFame, options)
-
-# ╔═╡ a8091427-ac31-4f98-a347-c5ae15645f83
-eqn = node_to_symbolic(dominating[end].tree, options, varMap=variableNames)
+# ╔═╡ 1f02cdaa-ad5b-400f-a631-5d190bef9228
+md"Try out formula"
 
 # ╔═╡ 4820ddab-e2bb-41ef-8319-c97cd61ca9f8
 y_pred = [4.331889 + 0.6692549*dataset[i,5] + (-1.0183419*dataset[i,5]) / (dataset[i,7] + (-0.08954537dataset[i,6]*dataset[i,5]) / dataset[i,4]) for i in 1:432]
 
+# ╔═╡ da0f15f3-a18b-41e3-97df-2b0589c72799
+begin
+	plot(1:432),y)
+	plot!(1:432,y_pred)
+end;
+
+# ╔═╡ df82d32c-c21c-4e57-a271-73de74bd71ab
+md"## Appendix"
+
 # ╔═╡ 5814d9d8-8325-469b-b68e-1944ddbef429
 function smooth(dataPoints; smoothness=10)
-	return [sum(dataPoints[i:i+smoothness-1])/smoothness for i in 1:(length(dataPoints)-smoothness+1)]
+	return [i <= smoothness ? missing : sum(dataPoints[(i-smoothness+1):i])/smoothness for i in 1:length(dataPoints)]
 end
 
 # ╔═╡ 5afac8d7-d2e1-4ec9-b644-7730a760c154
 begin
-	sm = 7
-	plot(1:(length(wellbeing)-sm+1),smooth(wellbeing, smoothness=sm))
-	plot!(1:(length(emotionality)-sm+1),(smooth(emotionality, smoothness=sm).-10).*2)
+	sm = 21
+	plot(1:(length(wellbeing)),smooth(wellbeing, smoothness=sm), label="wellbeing")
+	plot!(1:(length(emotionality)),(smooth(emotionality, smoothness=sm).-10).*2, label="emotionality")
 end
 
-# ╔═╡ 938a9c33-f83c-4080-bd2b-6773fed1a86e
-begin
-	smt = 30
-	plot(1:(length(meditation)-smt+1),(smooth(meditation, smoothness=smt).-1).*5)
-	plot!(1:(length(wellbeing)-smt+1),smooth(wellbeing, smoothness=smt))
+# ╔═╡ 9baaa0bf-d150-4b09-8a83-d4e64f407fba
+function variability(dataPoints; days=10)
+	return [i <= days ? missing : var(dataPoints[(i-days+1):i]) for i in 1:length(dataPoints)]
 end
 
-# ╔═╡ da0f15f3-a18b-41e3-97df-2b0589c72799
+# ╔═╡ 284402aa-d794-4e29-b407-5674befbfc81
 begin
-	plot(smooth(1:432),smooth(y))
-	plot!(smooth(1:432),smooth(y_pred))
-end
+	aggrPeriod = [2,7,21,60]
+	varNames = []
+	nameBase = ["meditation", "exercise", "sleepDuration", "sleepEnd", "sleepDurationVar", "sleepEndVar"]
+	newVars = []
+	for i in aggrPeriod
+		push!(newVars, smooth(predictor_cropped[:,"meditation"], smoothness=i))
+		push!(newVars, smooth(predictor_cropped[:,"exercise"], smoothness=i))
+		push!(newVars, smooth(predictor_cropped[:,"sleepDuration"], smoothness=i))
+		push!(newVars, smooth(predictor_cropped[:,"sleepEnd"], smoothness=i))
+		push!(newVars, variability(predictor_cropped[:,"sleepDuration"], days=i))
+		push!(newVars, variability(predictor_cropped[:,"sleepEnd"], days=i))
+		append!(varNames, nameBase.*("Past"*string(i)))
+	end
+	X = [newVars[i][j] for i in 1:length(newVars), j in 1:length(newVars[1])]
+	X_cropped = Matrix{Float64}(X[:,sum(X[end,:].===missing)+1:end])
+	varNames = Vector{String}(varNames)
+end;
+
+# ╔═╡ 99a68eb2-c058-4224-95d8-83edc893ac5f
+y = wellbeing[length(wellbeing)-size(X_cropped)[2]+1:end];
+
+# ╔═╡ d6c8df62-2afa-4f6f-9516-cc613a588fbe
+hallOfFame = EquationSearch(X_cropped, y, niterations=2, varMap=varNames, options=options, numprocs=0)
+
+# ╔═╡ 09c0929b-184c-4c03-b5cb-954d58a4eee6
+dominating = calculateParetoFrontier(X_cropped, y, hallOfFame, options)
+
+# ╔═╡ a8091427-ac31-4f98-a347-c5ae15645f83
+eqn = node_to_symbolic(dominating[end].tree, options, varMap=varNames)
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -1203,14 +1244,22 @@ version = "3.5.0+0"
 # ╠═5afac8d7-d2e1-4ec9-b644-7730a760c154
 # ╟─b4c01050-247f-4b7a-a08c-aace0ba29b71
 # ╠═321bc3e8-9d5e-439b-8051-9650e44d2268
-# ╠═938a9c33-f83c-4080-bd2b-6773fed1a86e
+# ╟─d4f5845d-5f93-4128-b786-e8f48ca1bed3
+# ╠═f4ec23bb-423e-4253-9f27-11d79577fb1b
+# ╟─0782f22f-abd5-4600-93d8-351b7e66e46a
+# ╠═284402aa-d794-4e29-b407-5674befbfc81
+# ╠═0ca328af-ae2a-4784-91ea-2abb4bda988a
 # ╠═99a68eb2-c058-4224-95d8-83edc893ac5f
+# ╟─97fa1a98-6473-4317-b1bc-b1edf5e76504
 # ╠═4d13d667-01b7-4dd9-abcf-6214b87c26db
 # ╠═d6c8df62-2afa-4f6f-9516-cc613a588fbe
 # ╠═09c0929b-184c-4c03-b5cb-954d58a4eee6
 # ╠═a8091427-ac31-4f98-a347-c5ae15645f83
+# ╟─1f02cdaa-ad5b-400f-a631-5d190bef9228
 # ╠═4820ddab-e2bb-41ef-8319-c97cd61ca9f8
 # ╠═da0f15f3-a18b-41e3-97df-2b0589c72799
+# ╟─df82d32c-c21c-4e57-a271-73de74bd71ab
 # ╠═5814d9d8-8325-469b-b68e-1944ddbef429
+# ╠═9baaa0bf-d150-4b09-8a83-d4e64f407fba
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
