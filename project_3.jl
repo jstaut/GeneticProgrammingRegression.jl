@@ -4,8 +4,18 @@
 using Markdown
 using InteractiveUtils
 
+# This Pluto notebook uses @bind for interactivity. When running this notebook outside of Pluto, the following 'mock version' of @bind gives bound variables a default value (instead of an error).
+macro bind(def, element)
+    quote
+        local iv = try Base.loaded_modules[Base.PkgId(Base.UUID("6e696c72-6542-2067-7265-42206c756150"), "AbstractPlutoDingetjes")].Bonds.initial_value catch; b -> missing; end
+        local el = $(esc(element))
+        global $(esc(def)) = Core.applicable(Base.get, el) ? Base.get(el) : iv(el)
+        el
+    end
+end
+
 # ╔═╡ 5f9b5d30-68cb-11ec-2e1e-aff540c73252
-using SymbolicRegression, Distributed, CSV, DataFrames, MultivariateStats, Statistics, Plots, StatPlots
+using SymbolicRegression, Distributed, CSV, DataFrames, MultivariateStats, Statistics, Plots, StatPlots, HTTP, InteractiveUtils, PlutoUI, SymbolicUtils
 
 # ╔═╡ ecfd3b68-0f66-4695-87a3-404eafad37bc
 md"""# Project: Genetic Programming for Regression"""
@@ -21,7 +31,7 @@ Dive deeper and explain the way the package works
 md"Read in data set"
 
 # ╔═╡ 4ec5675e-a40b-4f12-bffc-9c6aeeebf7c0
-dataset = DataFrame(CSV.File("moodsData.csv"; header=1, delim=";"));
+dataset = DataFrame(CSV.File(HTTP.get("https://github.com/jstaut/GeneticProgrammingRegression.jl/raw/main/moodsData.csv").body; header=1, delim=";"));
 
 # ╔═╡ d09fa8c4-c19d-4e5f-9d5f-c7831ec3762b
 md"## Explore and prepare data set"
@@ -71,6 +81,41 @@ md"The second response variable to investigate is `emotionality`"
 # ╔═╡ 98bcdc51-cbba-409d-9fe2-6b9acf94c279
 emotionality = Array{Float64}(dataset[:,7]);
 
+# ╔═╡ ed50cd54-1a62-4474-88b8-0338023315d2
+md"""For both response variables we can apply averaging/smoothing and plot the data to see if we can find long term effects. Adjust the settings below to see how averaging and smoothing help to see more general patterns.
+"""
+
+# ╔═╡ 47438d1b-b777-4909-9011-96b76a311544
+begin
+	checkWellbeing = @bind plotWellbeing CheckBox(default=true)
+	checkEmotionality = @bind plotEmotionality CheckBox(default=false)
+	
+	md"""**Choose response variable(s) to display:**
+
+	Plot wellbeing $checkWellbeing \
+	Plot emotionality $checkEmotionality 
+	"""
+end
+
+# ╔═╡ bc5a23a4-861c-4d26-a3c5-9c2b9eb76a2b
+begin 
+	timeSlider = @bind time Slider(1:100, show_value=true, default=30)
+	smoothingSlider = @bind smoothing Slider(0:200, show_value=true, default=100)
+	
+	md"""**Set parameters:**
+
+	Time frame to average over: $timeSlider days
+
+	Degree of additional smoothing: $smoothingSlider"""
+end
+
+# ╔═╡ 0a54a5e1-d6dd-4fa4-b9d5-901c211250c9
+md"""The plot with the default settings indicates a general trend where wellbeing tends to oscillate with a period of 2.5 months, or 5 oscillations per year. As a general trend, wellbeing also seems to increase withing this data set. Also, when looking at the raw data without averaging or smoothing, it is visible that the variance appears to decrease over time which might pose some problems for the analysis.\
+For emotionality on the other hand, patterns are less clear, but also decreasing variance is visible."""
+
+# ╔═╡ b8b3a141-4e73-42ee-902c-296dc9938b72
+md"These observations shows that there is at least some structure in the data that can be exploited for modelling. It indicates that including past measurement of the response variables might helpt the predictions."
+
 # ╔═╡ b4c01050-247f-4b7a-a08c-aace0ba29b71
 md"#### The predictor variables"
 
@@ -84,7 +129,7 @@ md"Crop data set to remove data points with missing value for `exercise`"
 predictor_cropped = predictor[sum(predictor[:,"exercise"].===missing)+1:end,:];
 
 # ╔═╡ 0782f22f-abd5-4600-93d8-351b7e66e46a
-md"Create some derived variables by aggregating info on past data points"
+md"Create derived variables by aggregating info on past data points. The average value of the past $n$ days is calculated. Also info on the past values of the resonse variables are included. Secondly, for sleepDuration and sleepEnd also the variance is calculated as a potentially informative variable. The time periods to aggregate over are here chosen to be $string(aggrPeriod)"
 
 # ╔═╡ 0ca328af-ae2a-4784-91ea-2abb4bda988a
 md"Also crop the response variables to match the predictor data" 
@@ -92,76 +137,154 @@ md"Also crop the response variables to match the predictor data"
 # ╔═╡ 97fa1a98-6473-4317-b1bc-b1edf5e76504
 md"## The analysis"
 
+# ╔═╡ 4aecaa36-4ebc-4d80-8123-dd6a3087b87a
+begin
+	wellbeingBox = @bind responseVar Radio(["wellbeing","emotionality"], default="wellbeing")
+	md"""**Choose response variable to analyse:**
+
+	$wellbeingBox 
+	"""
+end
+
 # ╔═╡ 4d13d667-01b7-4dd9-abcf-6214b87c26db
 options = SymbolicRegression.Options(
-    binary_operators=(+, *, /, -),
-    unary_operators=tuple(),
-    npopulations=2
-)
+	# Choose the operators allowed to use in the equation
+    binary_operators=(+, *, /, -, ^), 
+    unary_operators=(tanh, relu),
+    npopulations=4
+);
 
-# ╔═╡ 1f02cdaa-ad5b-400f-a631-5d190bef9228
-md"Try out formula"
+# ╔═╡ 68dae25b-76da-4ac3-8cc9-2e8a41ddf7ba
+md"We investigate the one with the best score."
 
-# ╔═╡ 4820ddab-e2bb-41ef-8319-c97cd61ca9f8
-y_pred = [4.331889 + 0.6692549*dataset[i,5] + (-1.0183419*dataset[i,5]) / (dataset[i,7] + (-0.08954537dataset[i,6]*dataset[i,5]) / dataset[i,4]) for i in 1:432]
+# ╔═╡ 5247b2c1-462e-43ae-80df-e46c2de360b3
+md"Finally, we try out derived equation to make the predictions."
 
-# ╔═╡ da0f15f3-a18b-41e3-97df-2b0589c72799
-begin
-	plot(1:432),y)
-	plot!(1:432,y_pred)
-end;
+# ╔═╡ 1649eebb-3d07-4327-983f-32311fd0b730
+begin 
+	timeSlider2 = @bind time2 Slider(1:50, show_value=true, default=1)
+	smoothingSlider2 = @bind smoothing2 Slider(0:100, show_value=true, default=0)
+	
+	md"""**Optional averaging/smoothing:**
+
+	Time frame to average over: $timeSlider2 days
+
+	Degree of additional smoothing: $smoothingSlider2"""
+end
 
 # ╔═╡ df82d32c-c21c-4e57-a271-73de74bd71ab
 md"## Appendix"
 
-# ╔═╡ 5814d9d8-8325-469b-b68e-1944ddbef429
-function smooth(dataPoints; smoothness=10)
-	return [i <= smoothness ? missing : sum(dataPoints[(i-smoothness+1):i])/smoothness for i in 1:length(dataPoints)]
-end
+# ╔═╡ 13b7c0f0-d2ad-4582-be41-1e35858c2236
+scale(A) = (A .- mean(A,dims=1)) ./ std(A,dims=1)
 
-# ╔═╡ 5afac8d7-d2e1-4ec9-b644-7730a760c154
-begin
-	sm = 21
-	plot(1:(length(wellbeing)),smooth(wellbeing, smoothness=sm), label="wellbeing")
-	plot!(1:(length(emotionality)),(smooth(emotionality, smoothness=sm).-10).*2, label="emotionality")
+# ╔═╡ 5814d9d8-8325-469b-b68e-1944ddbef429
+function n_days_average(dataPoints; n=10, onlyPast=false)
+	shift = onlyPast ? 1 : 0
+	return [(i < (n+shift) || dataPoints[i-n+1-shift] === missing) ? missing : sum(dataPoints[(i-n+1-shift):(i-shift)])/n for i in (n+shift):length(dataPoints)]
 end
 
 # ╔═╡ 9baaa0bf-d150-4b09-8a83-d4e64f407fba
-function variability(dataPoints; days=10)
-	return [i <= days ? missing : var(dataPoints[(i-days+1):i]) for i in 1:length(dataPoints)]
+function n_days_variance(dataPoints; n=10, onlyPast=false)
+	shift = onlyPast ? 1 : 0
+	return [i < (n+shift) ? missing : var(dataPoints[(i-n+1-shift):(i-shift)]) for i in (n+shift):length(dataPoints)]
 end
 
 # ╔═╡ 284402aa-d794-4e29-b407-5674befbfc81
 begin
-	aggrPeriod = [2,7,21,60]
+	aggrPeriod = [2, 7, 21, 60]
 	varNames = []
-	nameBase = ["meditation", "exercise", "sleepDuration", "sleepEnd", "sleepDurationVar", "sleepEndVar"]
+	nameBase = ["wellbeing", "emotionality", "meditation", "exercise", "sleepDuration", "sleepEnd", "sleepDurationVar", "sleepEndVar"]
 	newVars = []
 	for i in aggrPeriod
-		push!(newVars, smooth(predictor_cropped[:,"meditation"], smoothness=i))
-		push!(newVars, smooth(predictor_cropped[:,"exercise"], smoothness=i))
-		push!(newVars, smooth(predictor_cropped[:,"sleepDuration"], smoothness=i))
-		push!(newVars, smooth(predictor_cropped[:,"sleepEnd"], smoothness=i))
-		push!(newVars, variability(predictor_cropped[:,"sleepDuration"], days=i))
-		push!(newVars, variability(predictor_cropped[:,"sleepEnd"], days=i))
+		push!(newVars, n_days_average(wellbeing, n=i, onlyPast=true))
+		push!(newVars, n_days_average(emotionality, n=i, onlyPast=true))
+		push!(newVars, n_days_average(predictor_cropped[:,"meditation"], n=i, 
+              onlyPast=true))
+		push!(newVars, n_days_average(predictor_cropped[:,"exercise"], n=i, 
+              onlyPast=true))
+		push!(newVars, n_days_average(predictor_cropped[:,"sleepDuration"], n=i, 
+              onlyPast=true))
+		push!(newVars, n_days_average(predictor_cropped[:,"sleepEnd"], n=i, 
+              onlyPast=true))
+		push!(newVars, n_days_variance(predictor_cropped[:,"sleepDuration"], n=i, 
+              onlyPast=true))
+		push!(newVars, n_days_variance(predictor_cropped[:,"sleepEnd"], n=i, 
+              onlyPast=true))
 		append!(varNames, nameBase.*("Past"*string(i)))
 	end
+	# Crop the new variables to be of the same size
+	minSize = minimum(length(t) for t in newVars)
+	newVars = [newVar[length(newVar)-minSize+1:end] for newVar in newVars]
 	X = [newVars[i][j] for i in 1:length(newVars), j in 1:length(newVars[1])]
-	X_cropped = Matrix{Float64}(X[:,sum(X[end,:].===missing)+1:end])
 	varNames = Vector{String}(varNames)
-end;
+end
+
+# ╔═╡ b1ff1b63-4867-4c50-8ae3-031c46cbfb66
+string(aggrPeriod)
 
 # ╔═╡ 99a68eb2-c058-4224-95d8-83edc893ac5f
-y = wellbeing[length(wellbeing)-size(X_cropped)[2]+1:end];
+y_Wb = wellbeing[length(wellbeing)-size(X)[2]+1:end];
+
+# ╔═╡ be3ca46a-9ac8-484d-a93f-84a6bfaea4ec
+y_Em = emotionality[length(emotionality)-size(X)[2]+1:end];
+
+# ╔═╡ 7a3521c6-7abb-4c6b-a782-2dc05f837e96
+y = responseVar == "wellbeing" ? y_Wb : y_Em;
 
 # ╔═╡ d6c8df62-2afa-4f6f-9516-cc613a588fbe
-hallOfFame = EquationSearch(X_cropped, y, niterations=2, varMap=varNames, options=options, numprocs=0)
+hallOfFame = EquationSearch(X, y, niterations=4, varMap=varNames, options=options, numprocs=0);
 
 # ╔═╡ 09c0929b-184c-4c03-b5cb-954d58a4eee6
-dominating = calculateParetoFrontier(X_cropped, y, hallOfFame, options)
+dominating = calculateParetoFrontier(X, y, hallOfFame, options);
+
+# ╔═╡ 573e8315-2b7f-4e61-8150-434c5dfb6fd9
+best = argmin([dominating[i].score for i in 1:length(dominating)]);
+
+# ╔═╡ 6c092a62-c9c3-4e9a-8da7-566098ed1c5d
+begin
+	isare = length(dominating)==1 ? "is" : "are"
+	model = length(dominating)==1 ? "model" : "models"
+	md"There $isare $(length(dominating)) dominating $model."
+end
 
 # ╔═╡ a8091427-ac31-4f98-a347-c5ae15645f83
-eqn = node_to_symbolic(dominating[end].tree, options, varMap=varNames)
+eqn = node_to_symbolic(dominating[best].tree, options, varMap=varNames)
+
+# ╔═╡ afbc14c5-c31c-46e2-b68f-9d9309a2825e
+y_pred = evalTreeArray(dominating[best].tree, X, options)[1];
+
+# ╔═╡ 595dfe24-379c-4fc3-9cfe-95a1b65d1710
+function smooth(dataPoints; smoothness=10)
+	data = copy(dataPoints)
+	for i in 1:smoothness
+		data = n_days_average(data, n=2)
+	end
+	return data[2:end]
+end
+
+# ╔═╡ 5afac8d7-d2e1-4ec9-b644-7730a760c154
+begin
+	y1_sm = smooth(n_days_average(scale(wellbeing), n=time), smoothness=smoothing)
+	y2_sm = smooth(n_days_average(scale(emotionality), n=time), smoothness=smoothing)
+	title="Response variable(s): smoothed and averaged"
+	if plotWellbeing && plotEmotionality
+		plot(1:(length(y1_sm)),y1_sm, label="wellbeing", legend=:topleft, title=title)
+		plot!(1:(length(y2_sm)),y2_sm, label="emotionality", legend=:topleft)
+	elseif plotWellbeing
+		plot(1:(length(y1_sm)),y1_sm, label="wellbeing", legend=:topleft, title=title)
+	elseif plotEmotionality
+		plot(1:(length(y2_sm)),y2_sm, label="emotionality", legend=:topleft, title=title)
+	end
+end
+
+# ╔═╡ da0f15f3-a18b-41e3-97df-2b0589c72799
+begin
+	y0 = smooth(n_days_average(y, n=time2), smoothness=smoothing2)
+	y1 = smooth(n_days_average(y_pred, n=time2), smoothness=smoothing2)
+	plot(1:length(y0), y0, label="original data")
+	plot!(1:length(y0), y1, label="predictions")
+end
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -169,19 +292,26 @@ PLUTO_PROJECT_TOML_CONTENTS = """
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
+HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
+InteractiveUtils = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
 MultivariateStats = "6f286f6a-111f-5878-ab1e-185364afe411"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
 StatPlots = "60ddc479-9b66-56df-82fc-76a74619b69c"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 SymbolicRegression = "8254be44-1295-4e6a-a16d-46603ac705cb"
+SymbolicUtils = "d1185830-fcd6-423d-90d6-eec64667417b"
 
 [compat]
 CSV = "~0.9.11"
 DataFrames = "~1.3.1"
+HTTP = "~0.9.17"
 MultivariateStats = "~0.8.0"
 Plots = "~0.29.9"
+PlutoUI = "~0.7.1"
 StatPlots = "~0.9.2"
 SymbolicRegression = "~0.4.11"
+SymbolicUtils = "~0.6.3"
 """
 
 # ╔═╡ 00000000-0000-0000-0000-000000000002
@@ -527,6 +657,12 @@ git-tree-sha1 = "53bb909d1151e57e2484c3d1b53e19552b887fb2"
 uuid = "42e2da0e-8278-4e71-bc24-59509adca0fe"
 version = "1.0.2"
 
+[[HTTP]]
+deps = ["Base64", "Dates", "IniFile", "Logging", "MbedTLS", "NetworkOptions", "Sockets", "URIs"]
+git-tree-sha1 = "0fa77022fe4b511826b39c894c90daf5fce3334a"
+uuid = "cd3eb016-35fb-5094-929b-558a96fad6f3"
+version = "0.9.17"
+
 [[HarfBuzz_jll]]
 deps = ["Artifacts", "Cairo_jll", "Fontconfig_jll", "FreeType2_jll", "Glib_jll", "Graphite2_jll", "JLLWrappers", "Libdl", "Libffi_jll", "Pkg"]
 git-tree-sha1 = "129acf094d168394e80ee1dc4bc06ec835e510a3"
@@ -537,6 +673,12 @@ version = "2.8.1+1"
 git-tree-sha1 = "debdd00ffef04665ccbb3e150747a77560e8fad1"
 uuid = "615f187c-cbe4-4ef1-ba3b-2fcf58d6d173"
 version = "0.1.1"
+
+[[IniFile]]
+deps = ["Test"]
+git-tree-sha1 = "098e4d2c533924c921f9f9847274f2ad89e018b8"
+uuid = "83e8ac13-25f8-5344-8a64-a9f2b223428f"
+version = "0.5.0"
 
 [[InlineStrings]]
 deps = ["Parsers"]
@@ -711,6 +853,12 @@ version = "0.5.9"
 deps = ["Base64"]
 uuid = "d6f4376e-aef5-505a-96c1-9c027394607a"
 
+[[MbedTLS]]
+deps = ["Dates", "MbedTLS_jll", "Random", "Sockets"]
+git-tree-sha1 = "1c38e51c3d08ef2278062ebceade0e46cefc96fe"
+uuid = "739be429-bea8-5141-9913-cc70e7f3736d"
+version = "1.0.3"
+
 [[MbedTLS_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "c8ffd9c3-330d-5841-b78e-0817d7145fa1"
@@ -771,9 +919,9 @@ version = "1.10.8"
 
 [[Ogg_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "7937eda4681660b4d6aeeecc2f7e1c81c8ee4e2f"
+git-tree-sha1 = "887579a3eb005446d514ab7aeac5d1d027658b8f"
 uuid = "e7412a2a-1a6e-54c0-be00-318e2571c051"
-version = "1.3.5+0"
+version = "1.3.5+1"
 
 [[OpenBLAS_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "Libdl"]
@@ -859,6 +1007,12 @@ deps = ["Base64", "Contour", "Dates", "FFMPEG", "FixedPointNumbers", "GR", "Geom
 git-tree-sha1 = "f226ff9b8e391f6a10891563c370aae8beb5d792"
 uuid = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 version = "0.29.9"
+
+[[PlutoUI]]
+deps = ["Base64", "Dates", "InteractiveUtils", "Logging", "Markdown", "Random", "Suppressor"]
+git-tree-sha1 = "45ce174d36d3931cd4e37a47f93e07d1455f038d"
+uuid = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
+version = "0.7.1"
 
 [[PooledArrays]]
 deps = ["DataAPI", "Future"]
@@ -1027,6 +1181,11 @@ version = "0.9.7"
 deps = ["Libdl", "LinearAlgebra", "Serialization", "SparseArrays"]
 uuid = "4607b0f0-06f3-5cda-b6b1-a6196a1729e9"
 
+[[Suppressor]]
+git-tree-sha1 = "a819d77f31f83e5792a76081eee1ea6342ab8787"
+uuid = "fd094767-a336-5f1f-9728-57cf17d0bbfb"
+version = "0.2.0"
+
 [[SymbolicRegression]]
 deps = ["Distributed", "Optim", "Pkg", "Printf", "Random", "SpecialFunctions", "SymbolicUtils"]
 git-tree-sha1 = "9c8754cff82a9faf13af4bf76b7503f3943fcf93"
@@ -1080,6 +1239,11 @@ deps = ["Random", "Test"]
 git-tree-sha1 = "216b95ea110b5972db65aa90f88d8d89dcb8851c"
 uuid = "3bb67fe8-82b1-5028-8e26-92a6c54297fa"
 version = "0.9.6"
+
+[[URIs]]
+git-tree-sha1 = "97bbe755a53fe859669cd907f2d96aee8d2c1355"
+uuid = "5c2747f8-b7ea-4ff2-ba2e-563bfd36b1d4"
+version = "1.3.0"
 
 [[UUIDs]]
 deps = ["Random", "SHA"]
@@ -1195,9 +1359,9 @@ version = "1.6.38+0"
 
 [[libvorbis_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Ogg_jll", "Pkg"]
-git-tree-sha1 = "c45f4e40e7aafe9d086379e5578947ec8b95a8fb"
+git-tree-sha1 = "b910cb81ef3fe6e78bf6acee440bda86fd6ae00c"
 uuid = "f27f6e37-5d2b-51aa-960f-b287f2bc3b7a"
-version = "1.3.7+0"
+version = "1.3.7+1"
 
 [[nghttp2_jll]]
 deps = ["Artifacts", "Libdl"]
@@ -1241,25 +1405,40 @@ version = "3.5.0+0"
 # ╟─82a567c0-ee21-4e5c-a079-736cf5a9493a
 # ╟─8e9f1328-8a8e-4629-8004-8efd31429b69
 # ╠═98bcdc51-cbba-409d-9fe2-6b9acf94c279
-# ╠═5afac8d7-d2e1-4ec9-b644-7730a760c154
+# ╟─ed50cd54-1a62-4474-88b8-0338023315d2
+# ╟─47438d1b-b777-4909-9011-96b76a311544
+# ╟─bc5a23a4-861c-4d26-a3c5-9c2b9eb76a2b
+# ╟─5afac8d7-d2e1-4ec9-b644-7730a760c154
+# ╟─0a54a5e1-d6dd-4fa4-b9d5-901c211250c9
+# ╟─b8b3a141-4e73-42ee-902c-296dc9938b72
 # ╟─b4c01050-247f-4b7a-a08c-aace0ba29b71
 # ╠═321bc3e8-9d5e-439b-8051-9650e44d2268
 # ╟─d4f5845d-5f93-4128-b786-e8f48ca1bed3
 # ╠═f4ec23bb-423e-4253-9f27-11d79577fb1b
-# ╟─0782f22f-abd5-4600-93d8-351b7e66e46a
+# ╠═0782f22f-abd5-4600-93d8-351b7e66e46a
+# ╠═b1ff1b63-4867-4c50-8ae3-031c46cbfb66
 # ╠═284402aa-d794-4e29-b407-5674befbfc81
-# ╠═0ca328af-ae2a-4784-91ea-2abb4bda988a
+# ╟─0ca328af-ae2a-4784-91ea-2abb4bda988a
 # ╠═99a68eb2-c058-4224-95d8-83edc893ac5f
+# ╠═be3ca46a-9ac8-484d-a93f-84a6bfaea4ec
 # ╟─97fa1a98-6473-4317-b1bc-b1edf5e76504
+# ╟─4aecaa36-4ebc-4d80-8123-dd6a3087b87a
+# ╠═7a3521c6-7abb-4c6b-a782-2dc05f837e96
 # ╠═4d13d667-01b7-4dd9-abcf-6214b87c26db
 # ╠═d6c8df62-2afa-4f6f-9516-cc613a588fbe
 # ╠═09c0929b-184c-4c03-b5cb-954d58a4eee6
+# ╠═573e8315-2b7f-4e61-8150-434c5dfb6fd9
+# ╟─6c092a62-c9c3-4e9a-8da7-566098ed1c5d
+# ╟─68dae25b-76da-4ac3-8cc9-2e8a41ddf7ba
 # ╠═a8091427-ac31-4f98-a347-c5ae15645f83
-# ╟─1f02cdaa-ad5b-400f-a631-5d190bef9228
-# ╠═4820ddab-e2bb-41ef-8319-c97cd61ca9f8
-# ╠═da0f15f3-a18b-41e3-97df-2b0589c72799
+# ╟─5247b2c1-462e-43ae-80df-e46c2de360b3
+# ╠═afbc14c5-c31c-46e2-b68f-9d9309a2825e
+# ╟─1649eebb-3d07-4327-983f-32311fd0b730
+# ╟─da0f15f3-a18b-41e3-97df-2b0589c72799
 # ╟─df82d32c-c21c-4e57-a271-73de74bd71ab
+# ╠═13b7c0f0-d2ad-4582-be41-1e35858c2236
 # ╠═5814d9d8-8325-469b-b68e-1944ddbef429
 # ╠═9baaa0bf-d150-4b09-8a83-d4e64f407fba
+# ╠═595dfe24-379c-4fc3-9cfe-95a1b65d1710
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
