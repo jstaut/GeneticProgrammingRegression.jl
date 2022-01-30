@@ -30,4 +30,6 @@ For this data set, I tracked my mood state each day over a period of 644 days. I
 
 The `SymbolicRegression` package uses genetic programming to find a symbolic formula that predicts a response variable, using a set of predictor variables. Under the hood, the symbolic equations are represented as trees with nodes corresponding to an operator. The binary operator `+` for example can be linked to a node of a tree with two branches that respresent the two terms of the sum, each of which can be a sub-equation (or subtree) themselves. The leafs of these equation trees are either numbers or variables.
 
-In `EquationSearch`, the central function of the package, these tree-equations are evolved every iteration into similar but better performing equations. 
+In `EquationSearch`, the central function of the package, these tree-equations are evolved every iteration into similar but better performing equations. A set of promising equations are kept in the *Hall of fame* and are evolved in further iterations.
+
+Lastly, the dominating Pareto frontier is calculated for the equations in the hall of fame. This corresponds to the equations for which all simpler equations perform worse.
