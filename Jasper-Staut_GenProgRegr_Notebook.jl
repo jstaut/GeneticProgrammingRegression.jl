@@ -1,5 +1,5 @@
 ### A Pluto.jl notebook ###
-# v0.17.1
+# v0.17.7
 
 using Markdown
 using InteractiveUtils
@@ -15,14 +15,41 @@ macro bind(def, element)
 end
 
 # ╔═╡ 5f9b5d30-68cb-11ec-2e1e-aff540c73252
-using SymbolicRegression, Distributed, CSV, DataFrames, MultivariateStats, Statistics, Plots, StatPlots, HTTP, PlutoUI, SymbolicUtils
+using SymbolicRegression, CSV, DataFrames, MultivariateStats, Statistics, Plots, HTTP, PlutoUI, SymbolicUtils, GLM
 
 # ╔═╡ ecfd3b68-0f66-4695-87a3-404eafad37bc
-md"""# Project: Genetic Programming for Regression"""
+md"""# Project: Genetic Programming for Regression
+
+**STMO**
+
+2021-2022
+
+project by Jasper Staut"""
 
 # ╔═╡ 94e88596-464d-41e7-a0da-68fc69f4e9c6
 md"""## The concept
-Apply the `SymbolicRegression` package for a regression problem.
+Apply the `SymbolicRegression` package for a regression problem and compare it to classical linear regression.
+
+### The Data set
+For this data set, I tracked my mood state each day over a period of 644 days. It includes following variables:
+
+**Response variables** (score 0-10)
+- frustration
+- energy
+- clarity
+- happiness
+- guilt
+- emotionality
+- anxiety
+- confidence
+
+**Predictor variables**
+- sleepStart (bed time, time of day with 0 being midnight)
+- sleepEnd (waking up, time of day with 0 being midnight)
+- sleepDuration (amount slept, hours)
+- sleepNap (napped during day, hours)
+- meditation (score 0-2)
+- exercise (physical exercise, score 0-2)
 
 ### The SymbolicRegression package
 The `SymbolicRegression` package uses genetic programming to find a symbolic formula that predicts a response variable, using a set of predictor variables. Under the hood, the symbolic equations are represented as trees with nodes corresponding to an operator. The binary operator `+` for example can be linked to a node of a tree with two branches that respresent the two terms of the sum, each of which can be a sub-equation (or subtree) themselves. The leafs of these equation trees are either numbers or variables.
@@ -30,6 +57,8 @@ The `SymbolicRegression` package uses genetic programming to find a symbolic for
 In `EquationSearch`, the central function of the package, these tree-equations are evolved every iteration into similar but better performing equations. A set of promising equations are kept in the *Hall of fame* and are evolved in further iterations.
 
 Lastly, the dominating Pareto frontier is calculated for the equations in the hall of fame. This corresponds to the equations for which all simpler equations perform worse.
+
+An advantage here is of course that non-linear relations can be modelled by including non-linear operators in your equations.
 """
 
 # ╔═╡ d09fa8c4-c19d-4e5f-9d5f-c7831ec3762b
@@ -49,7 +78,7 @@ md"First, let's take a look the response variables:\
 (note that this data set is a time series)"
 
 # ╔═╡ 13af064b-9abc-4c8e-9ada-831910ced6fb
-response = dataset[:,vcat(2:9)]
+response = dataset[:,vcat(2:9)] # separate the response variables
 
 # ╔═╡ b001aa84-527b-4ccd-96aa-8c4c9434870a
 respNames = names(response);
@@ -115,7 +144,7 @@ begin
 end
 
 # ╔═╡ 0a54a5e1-d6dd-4fa4-b9d5-901c211250c9
-md"""The plot with the default settings indicates a general trend where wellbeing tends to oscillate with a period of 2.5 months, or 5 oscillations per year. As a general trend, wellbeing also seems to increase withing this data set. Also, when looking at the raw data without averaging or smoothing, it is visible that the variance appears to decrease over time which might pose some problems for the analysis.\
+md"""The plot with the default settings indicates a general trend where wellbeing tends to oscillate with a period of 2.5 months, or 5 oscillations per year. As a general trend, wellbeing also seems to increase within this data set. Also, when looking at the raw data without averaging or smoothing, it is visible that the variance appears to decrease over time which might pose some problems for the analysis.\
 For emotionality on the other hand, patterns are less clear, but also decreasing variance is visible."""
 
 # ╔═╡ b8b3a141-4e73-42ee-902c-296dc9938b72
@@ -125,7 +154,7 @@ md"These observations shows that there is at least some structure in the data th
 md"#### The predictor variables"
 
 # ╔═╡ 321bc3e8-9d5e-439b-8051-9650e44d2268
-predictor = dataset[:,11:end]
+predictor = dataset[:,11:end] # separate the predictor variables
 
 # ╔═╡ d4f5845d-5f93-4128-b786-e8f48ca1bed3
 md"Crop data set to remove data points with missing value for `exercise`"
@@ -148,22 +177,41 @@ begin
 	"""
 end
 
+# ╔═╡ 5e93efdb-216a-4483-a222-d6398c3010c6
+md"Split into a train and test set. The test set is here chosen to be 1/4 of the data."
+
+# ╔═╡ 813e6e2d-39b1-4963-92ff-55f2b9f4c1a8
+md"### Using genetic programming (SymbolicRegression)"
+
+# ╔═╡ 808ecc62-13bb-4e1e-9307-aa5b5ea1e5d0
+md"In this project, the default loss function of `EquationSearch` is used, being least squares. This makes it more comparable with classical linear regression."
+
 # ╔═╡ 4d13d667-01b7-4dd9-abcf-6214b87c26db
 options = SymbolicRegression.Options(
 	# Choose the operators allowed to use in the equation
     binary_operators=(+, *, /, -, ^), 
     unary_operators=(tanh, relu),
-    npopulations=4
+	# Choose the number of "genetic" populations of equations to start with
+    npopulations=6
 );
 
 # ╔═╡ 3d24ffe4-d5a7-4243-8649-44ef25ab65a2
 md"Please note that the code block below is the bottleneck of the notebook in terms of runtime."
 
 # ╔═╡ 68dae25b-76da-4ac3-8cc9-2e8a41ddf7ba
-md"We investigate the one with the best score."
+md"We investigate the one with the lowest MSE."
 
 # ╔═╡ 5247b2c1-462e-43ae-80df-e46c2de360b3
-md"Finally, we try out derived equation to make the predictions."
+md"Finally, we try out this equation to make the predictions."
+
+# ╔═╡ cb63b0a3-b1c2-4115-924d-f6f4ce343fe8
+begin
+	trainTestBox = @bind trainTest Radio(["all","train","test"], default="all")
+	md"""**Plot predictions for which part of the data?**
+
+	$trainTestBox 
+	"""
+end
 
 # ╔═╡ 1649eebb-3d07-4327-983f-32311fd0b730
 begin 
@@ -177,28 +225,58 @@ begin
 	Degree of additional smoothing: $smoothingSlider2"""
 end
 
+# ╔═╡ bc4db347-df99-4f82-9eb5-7deb234a3c37
+md"Let's calculate the MSE for the train and test set. Notice that from the different dominating models, we take the \"best\" one, meaning the one with the lowest MSE on the train set."
+
+# ╔═╡ adf4631c-e693-41a6-97cf-71aee3dc4d6a
+md"As a test, we can take one of the dominating equations with fewer variables, instead of the one with the lowest MSE."
+
+# ╔═╡ d3146239-e036-4629-9df3-0d8bdaf6d360
+md"### Using linear regression"
+
+# ╔═╡ e500e164-40df-4484-9bc9-9e2b03867076
+md"Create a model that includes all variables."
+
+# ╔═╡ db0ad624-122c-41e1-86b1-fc752d2f49fd
+formula = @formula(response ~ wellbeingPast2 + emotionalityPast2 + meditationPast2 + exercisePast2 + sleepDurationPast2 + sleepEndPast2 + sleepDurationVarPast2 + sleepEndVarPast2 + wellbeingPast7 + emotionalityPast7 + meditationPast7 + exercisePast7 + sleepDurationPast7 + sleepEndPast7 + sleepDurationVarPast7 + sleepEndVarPast7 + wellbeingPast21 + emotionalityPast21 + meditationPast21 + exercisePast21 + sleepDurationPast21 + sleepEndPast21 + sleepDurationVarPast21 + sleepEndVarPast21 + wellbeingPast60 + emotionalityPast60 + meditationPast60 + exercisePast60 + sleepDurationPast60 + sleepEndPast60 + sleepDurationVarPast60 + sleepEndVarPast60);
+
+# ╔═╡ 42eb0cd6-842c-44ba-b74f-7dab91bbc3d4
+md"Train the model."
+
+# ╔═╡ af7c2479-9e1c-4154-9b89-66f36c395fbf
+md"Now let's again calculate the MSE on train and test set."
+
+# ╔═╡ cd4b8636-98e6-475a-b44c-b542cd134fd1
+md"""**Comparing linear regression to genetic programming**
+
+For the data set used in this project, on the test set, some of the genetic programming equations seems to perform better than classical linear regression, particularly the equations with fewer variables included.\
+A critical note here is that excluding some of the less relevant variables from the linear model, or using regularization as in ridge regression might help with this problem. This is however outside the scope of this project."""
+
 # ╔═╡ 2c7a1446-94f6-4844-a8c3-2dc9af345592
-md"""### Conclusion
+md"""### Conclusions
 For wellbeing, the genetic programming approach to regression works reasonably well. Something that is noticeble however is that the first part of the data tend to get a better fit that the later time points. This is probably because there is more variability in the earlier time points. Therefore, bad predictions in that part of the data result in a higher loss and are thus penalized harder.
 
 Emotionality seems to be harder to predict. Here the formula heavily depends on past measurements of emotionality, rather than improving on that by using other variables.
 
-Lastly, the current approach lacks a cross-validation implementation to make sure the equations generated are not overfitting the data.
+When comparing `SymbolicRegression` to linear regression, the former can perform better, though not by a huge difference. Note however that the number of iterations and population size has been kept quite low to keep the runtime feasable. Increasing both might be needed to show the true potential of `SymbolicRegression` so that it clearly outperforms classical linear regression.
 """
 
 # ╔═╡ df82d32c-c21c-4e57-a271-73de74bd71ab
 md"## Appendix"
 
 # ╔═╡ 13b7c0f0-d2ad-4582-be41-1e35858c2236
+"""A function that centers and scales a matrix"""
 scale(A) = (A .- mean(A,dims=1)) ./ std(A,dims=1)
 
 # ╔═╡ 5814d9d8-8325-469b-b68e-1944ddbef429
+"""A function that calculates the moving average of the last n days, either in- or excluding the current day"""
 function n_days_average(dataPoints; n=10, onlyPast=false)
 	shift = onlyPast ? 1 : 0
 	return [(i < (n+shift) || dataPoints[i-n+1-shift] === missing) ? missing : sum(dataPoints[(i-n+1-shift):(i-shift)])/n for i in (n+shift):length(dataPoints)]
 end
 
 # ╔═╡ 9baaa0bf-d150-4b09-8a83-d4e64f407fba
+"""A function that calculates variance of the last n days, either in- or excluding the current day"""
 function n_days_variance(dataPoints; n=10, onlyPast=false)
 	shift = onlyPast ? 1 : 0
 	return [i < (n+shift) ? missing : var(dataPoints[(i-n+1-shift):(i-shift)]) for i in (n+shift):length(dataPoints)]
@@ -206,8 +284,8 @@ end
 
 # ╔═╡ 284402aa-d794-4e29-b407-5674befbfc81
 begin
-	aggrPeriod = [2, 7, 21, 60]
-	varNames = []
+	aggrPeriod = [2, 7, 21, 60] # Time frames to aggregate over
+	varNames = [] # Names of the new variables
 	nameBase = ["wellbeing", "emotionality", "meditation", "exercise", "sleepDuration", "sleepEnd", "sleepDurationVar", "sleepEndVar"]
 	newVars = []
 	for i in aggrPeriod
@@ -230,6 +308,7 @@ begin
 	# Crop the new variables to be of the same size
 	minSize = minimum(length(t) for t in newVars)
 	newVars = [newVar[length(newVar)-minSize+1:end] for newVar in newVars]
+	# Gather all in a matrix suitable for EquationSearch()
 	X = [newVars[i][j] for i in 1:length(newVars), j in 1:length(newVars[1])]
 	varNames = Vector{String}(varNames)
 end
@@ -246,11 +325,18 @@ y_Em = emotionality[length(emotionality)-size(X)[2]+1:end];
 # ╔═╡ 7a3521c6-7abb-4c6b-a782-2dc05f837e96
 y = responseVar == "wellbeing" ? y_Wb : y_Em;
 
+# ╔═╡ fe7be177-5e10-4f6c-af39-6442068bc2bc
+begin
+	k = 4
+	X_test, X_train = X[:,1:k:end], X[:,Not(1:k:end)]
+	y_test, y_train = y[1:k:end], y[Not(1:k:end)]
+end;
+
 # ╔═╡ d6c8df62-2afa-4f6f-9516-cc613a588fbe
-hallOfFame = EquationSearch(X, y, niterations=4, varMap=varNames, options=options, numprocs=0);
+hallOfFame = EquationSearch(X_train, y_train, niterations=4, varMap=varNames, options=options, numprocs=0);
 
 # ╔═╡ 09c0929b-184c-4c03-b5cb-954d58a4eee6
-dominating = calculateParetoFrontier(X, y, hallOfFame, options);
+dominating = calculateParetoFrontier(X_train, y_train, hallOfFame, options);
 
 # ╔═╡ 573e8315-2b7f-4e61-8150-434c5dfb6fd9
 best = argmin([dominating[i].score for i in 1:length(dominating)]);
@@ -262,13 +348,59 @@ begin
 	md"There $isare $(length(dominating)) dominating $model."
 end
 
-# ╔═╡ a8091427-ac31-4f98-a347-c5ae15645f83
-eqn = node_to_symbolic(dominating[best].tree, options, varMap=varNames)
+# ╔═╡ 4797578a-5007-4717-83f8-faf42fb2dcba
+y_pred_train = evalTreeArray(dominating[best].tree, X_train, options)[1];
 
-# ╔═╡ afbc14c5-c31c-46e2-b68f-9d9309a2825e
-y_pred = evalTreeArray(dominating[best].tree, X, options)[1];
+# ╔═╡ 88e3a5a9-4332-4936-aaa7-a20d3304e766
+y_pred_test = evalTreeArray(dominating[best].tree, X_test, options)[1];
+
+# ╔═╡ aa646ac8-8f66-4c51-be59-937869942f49
+md"For the training set, the MSE is $(round(mean((y_train.-y_pred_train).^2),digits=4)). However, for the test set, this is $(round(mean((y_test.-y_pred_test).^2),digits=4)). So we see that there is some overfitting."
+
+# ╔═╡ 148fdaa4-872c-474c-8303-98451087ad35
+y_pred_train2 = evalTreeArray(dominating[1].tree, X_train, options)[1];
+
+# ╔═╡ 25b36fc0-88a1-4508-a14f-e36807d0bc9c
+y_pred_test2 = evalTreeArray(dominating[1].tree, X_test, options)[1];
+
+# ╔═╡ df9e9389-3450-4ca1-b0cf-d75168e17c4f
+md"Now for the training set, the MSE is $(round(mean((y_train.-y_pred_train2).^2),digits=4)) and for the test set it is $(round(mean((y_test.-y_pred_test2).^2),digits=4)). The amount of overfitting seems to be reduced and the performance on the test set is improved!"
+
+# ╔═╡ a8091427-ac31-4f98-a347-c5ae15645f83
+eqn = node_to_symbolic(dominating[best].tree, options, varMap=varNames);
+
+# ╔═╡ 1ecf6a71-4db1-444f-ac08-fd8fa4c9b232
+md"""The full formula goes as follows:
+
+$eqn"""
+
+# ╔═╡ 83562b00-f1a9-4e86-84c4-7a4a7c59ade5
+begin
+	# Convert matrix format to DataFrame
+	X_df = DataFrame(X', :auto)
+	rename!(X_df, names(X_df) .=> varNames)
+	Xy_df = copy(X_df)
+	Xy_df = insertcols!(Xy_df, 1, :response => y)
+	# Split into train and test set
+	X_df_test, X_df_train = X_df[1:k:end,:], X_df[Not(1:k:end),:]
+	y_df_test, y_df_train = y[1:k:end], y[Not(1:k:end)]
+	Xy_df_test, Xy_df_train = Xy_df[1:k:end,:], Xy_df[Not(1:k:end),:]
+end;
+
+# ╔═╡ 772db893-fa81-4396-96d2-a6559331ca76
+linReg = lm(formula, Xy_df_train);
+
+# ╔═╡ 0534dc12-569c-42fa-8d67-9d42aa76ca66
+y_pred_linReg_train = predict(linReg, Xy_df_train);
+
+# ╔═╡ 7fff987d-1c79-4597-95dc-f6621f09f2ae
+y_pred_linReg_test = predict(linReg, Xy_df_test);
+
+# ╔═╡ a0587b87-9bc3-4228-a64c-93df52d2cad8
+md"For the training set, the MSE is $(round(mean((y_train.-y_pred_linReg_train).^2),digits=4)). For the test set, this is $(round(mean((y_test.-y_pred_linReg_test).^2),digits=4)). We conclude that there is quite some overfitting."
 
 # ╔═╡ 595dfe24-379c-4fc3-9cfe-95a1b65d1710
+"""A function that smooths data by averaging every two neighboring data points iteratively, with the number of iterations corresponding to the smoothness parameter"""
 function smooth(dataPoints; smoothness=10)
 	data = copy(dataPoints)
 	for i in 1:smoothness
@@ -283,10 +415,10 @@ begin
 	y2_sm = smooth(n_days_average(scale(emotionality), n=time), smoothness=smoothing)
 	title="Response variable(s): smoothed and averaged"
 	if plotWellbeing && plotEmotionality
-		plot(1:(length(y1_sm)),y1_sm, label="wellbeing", legend=:topleft, title=title)
+		plot(1:(length(y1_sm)),y1_sm, label="wellbeing", legend=:topleft, title=title, xlabel="Day", ylabel="Score")
 		plot!(1:(length(y2_sm)),y2_sm, label="emotionality", legend=:topleft)
 	elseif plotWellbeing
-		plot(1:(length(y1_sm)),y1_sm, label="wellbeing", legend=:topleft, title=title)
+		plot(1:(length(y1_sm)),y1_sm, label="wellbeing", legend=:topleft, title=title, xlabel="Day", ylabel="Score")
 	elseif plotEmotionality
 		plot(1:(length(y2_sm)),y2_sm, label="emotionality", legend=:topleft, title=title)
 	end
@@ -294,9 +426,12 @@ end
 
 # ╔═╡ da0f15f3-a18b-41e3-97df-2b0589c72799
 begin
-	y0 = smooth(n_days_average(y, n=time2), smoothness=smoothing2)
+	X_chosen = [X,X_train,X_test][trainTest .== ["all","train","test"]][1]
+	y_chosen = [y,y_train,y_test][trainTest .== ["all","train","test"]][1]
+	y_pred = evalTreeArray(dominating[best].tree, X_chosen, options)[1]
+	y0 = smooth(n_days_average(y_chosen, n=time2), smoothness=smoothing2)
 	y1 = smooth(n_days_average(y_pred, n=time2), smoothness=smoothing2)
-	plot(1:length(y0), y0, label="original data")
+	plot(1:length(y0), y0, label="original data", xlabel="Day", ylabel="Score")
 	plot!(1:length(y0), y1, label="predictions")
 end
 
@@ -305,12 +440,11 @@ PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
-Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
+GLM = "38e38edf-8417-5370-95a0-9cbb8c7f171a"
 HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
 MultivariateStats = "6f286f6a-111f-5878-ab1e-185364afe411"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
-StatPlots = "60ddc479-9b66-56df-82fc-76a74619b69c"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 SymbolicRegression = "8254be44-1295-4e6a-a16d-46603ac705cb"
 SymbolicUtils = "d1185830-fcd6-423d-90d6-eec64667417b"
@@ -318,11 +452,11 @@ SymbolicUtils = "d1185830-fcd6-423d-90d6-eec64667417b"
 [compat]
 CSV = "~0.9.11"
 DataFrames = "~1.3.1"
+GLM = "~1.6.1"
 HTTP = "~0.9.17"
 MultivariateStats = "~0.8.0"
 Plots = "~0.29.9"
 PlutoUI = "~0.7.1"
-StatPlots = "~0.9.2"
 SymbolicRegression = "~0.4.11"
 SymbolicUtils = "~0.6.3"
 """
@@ -336,18 +470,6 @@ deps = ["InteractiveUtils", "LinearAlgebra", "Markdown", "Random", "RandomExtens
 git-tree-sha1 = "7df2949bfd757e426897a4b579fbd5dc776ff8c9"
 uuid = "c3fe647b-3220-5bb0-a1ea-a7954cac585d"
 version = "0.12.0"
-
-[[AbstractFFTs]]
-deps = ["ChainRulesCore", "LinearAlgebra"]
-git-tree-sha1 = "6f1d9bc1c08f9f4a8fa92e3ea3cb50153a1b40d4"
-uuid = "621f4979-c628-5d54-868e-fcf4e3e8185c"
-version = "1.1.0"
-
-[[Adapt]]
-deps = ["LinearAlgebra"]
-git-tree-sha1 = "af92965fb30777147966f58acb05da51c5616b5f"
-uuid = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
-version = "3.3.3"
 
 [[ArgTools]]
 uuid = "0dad84c5-d112-42e6-8d28-ef12dabb789f"
@@ -372,12 +494,6 @@ version = "3.2.1"
 
 [[Artifacts]]
 uuid = "56f22d72-fd6d-98f1-02f0-08ddc0907c33"
-
-[[AxisAlgorithms]]
-deps = ["LinearAlgebra", "Random", "SparseArrays", "WoodburyMatrices"]
-git-tree-sha1 = "66771c8d21c8ff5e3a93379480a2307ac36863f7"
-uuid = "13072b0f-2c55-5437-9ae7-d433b7a33950"
-version = "1.0.1"
 
 [[Base64]]
 uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
@@ -411,12 +527,6 @@ deps = ["ChainRulesCore", "LinearAlgebra", "Test"]
 git-tree-sha1 = "bf98fa45a0a4cee295de98d4c1462be26345b9a1"
 uuid = "9e997f8a-9a97-42d5-a9f1-ce6bfc15e2c0"
 version = "0.1.2"
-
-[[Clustering]]
-deps = ["Distances", "LinearAlgebra", "NearestNeighbors", "Printf", "SparseArrays", "Statistics", "StatsBase"]
-git-tree-sha1 = "75479b7df4167267d75294d14b58244695beb2ac"
-uuid = "aaaa29a8-35af-508c-8bc3-b662a17a0fe5"
-version = "0.14.2"
 
 [[CodecZlib]]
 deps = ["TranscodingStreams", "Zlib_jll"]
@@ -490,12 +600,6 @@ git-tree-sha1 = "bfc1187b79289637fa0ef6d4436ebdfe6905cbd6"
 uuid = "e2d170a0-9d28-54be-80f0-106bbe20a464"
 version = "1.0.0"
 
-[[DataValues]]
-deps = ["DataValueInterfaces", "Dates"]
-git-tree-sha1 = "d88a19299eba280a6d062e135a43f00323ae70bf"
-uuid = "e7dc6d0d-1eca-5fa6-8ad6-5aecde8b7ea5"
-version = "0.4.13"
-
 [[Dates]]
 deps = ["Printf"]
 uuid = "ade2ca70-3891-5945-98fb-dc099432e06a"
@@ -503,6 +607,12 @@ uuid = "ade2ca70-3891-5945-98fb-dc099432e06a"
 [[DelimitedFiles]]
 deps = ["Mmap"]
 uuid = "8bb1440f-4735-579b-a4ab-409b98df4dab"
+
+[[DensityInterface]]
+deps = ["InverseFunctions", "Test"]
+git-tree-sha1 = "80c3e8639e3353e5d2912fb3a1916b8455e2494b"
+uuid = "b429d917-457f-4dbc-8f4c-0cc954292b1d"
+version = "0.4.0"
 
 [[DiffResults]]
 deps = ["StaticArrays"]
@@ -516,21 +626,15 @@ git-tree-sha1 = "9bc5dac3c8b6706b58ad5ce24cffd9861f07c94f"
 uuid = "b552c78f-8df3-52c6-915a-8e097449b14b"
 version = "1.9.0"
 
-[[Distances]]
-deps = ["LinearAlgebra", "SparseArrays", "Statistics", "StatsAPI"]
-git-tree-sha1 = "3258d0659f812acde79e8a74b11f17ac06d0ca04"
-uuid = "b4f34e82-e78d-54a5-968a-f98e89d6e8f7"
-version = "0.10.7"
-
 [[Distributed]]
 deps = ["Random", "Serialization", "Sockets"]
 uuid = "8ba89e20-285c-5b6f-9357-94700520ee1b"
 
 [[Distributions]]
-deps = ["FillArrays", "LinearAlgebra", "PDMats", "Printf", "QuadGK", "Random", "SpecialFunctions", "Statistics", "StatsBase", "StatsFuns"]
-git-tree-sha1 = "3676697fd903ba314aaaa0ec8d6813b354edb875"
+deps = ["ChainRulesCore", "DensityInterface", "FillArrays", "LinearAlgebra", "PDMats", "Printf", "QuadGK", "Random", "SparseArrays", "SpecialFunctions", "Statistics", "StatsBase", "StatsFuns", "Test"]
+git-tree-sha1 = "c6dd4a56078a7760c04b882d9d94a08a4669598d"
 uuid = "31c24e10-a181-5473-b8eb-7969acd0382f"
-version = "0.23.11"
+version = "0.25.44"
 
 [[DocStringExtensions]]
 deps = ["LibGit2"]
@@ -564,18 +668,6 @@ deps = ["Artifacts", "Bzip2_jll", "FreeType2_jll", "FriBidi_jll", "JLLWrappers",
 git-tree-sha1 = "d8a578692e3077ac998b50c0217dfd67f21d1e5f"
 uuid = "b22a6f82-2f65-5046-a5b2-351ab43fb4e5"
 version = "4.4.0+0"
-
-[[FFTW]]
-deps = ["AbstractFFTs", "FFTW_jll", "LinearAlgebra", "MKL_jll", "Preferences", "Reexport"]
-git-tree-sha1 = "463cb335fa22c4ebacfd1faba5fde14edb80d96c"
-uuid = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
-version = "1.4.5"
-
-[[FFTW_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "c6033cc3892d0ef5bb9cd29b7f2f0331ea5184ea"
-uuid = "f5851436-0d7a-5f13-b9de-f02708fd171a"
-version = "3.3.10+0"
 
 [[FilePathsBase]]
 deps = ["Compat", "Dates", "Mmap", "Printf", "Test", "UUIDs"]
@@ -634,6 +726,12 @@ version = "1.0.10+0"
 [[Future]]
 deps = ["Random"]
 uuid = "9fa8497b-333b-5362-9e8d-4d0656e87820"
+
+[[GLM]]
+deps = ["Distributions", "LinearAlgebra", "Printf", "Reexport", "SparseArrays", "SpecialFunctions", "Statistics", "StatsBase", "StatsFuns", "StatsModels"]
+git-tree-sha1 = "fb764dacfa30f948d52a6a4269ae293a479bbc62"
+uuid = "38e38edf-8417-5370-95a0-9cbb8c7f171a"
+version = "1.6.1"
 
 [[GR]]
 deps = ["Base64", "DelimitedFiles", "LinearAlgebra", "Printf", "Random", "Serialization", "Sockets", "Test", "UUIDs"]
@@ -699,21 +797,9 @@ git-tree-sha1 = "8d70835a3759cdd75881426fced1508bb7b7e1b6"
 uuid = "842dd82b-1e85-43dc-bf29-5d0ee9dffc48"
 version = "1.1.1"
 
-[[IntelOpenMP_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "d979e54b71da82f3a65b62553da4fc3d18c9004c"
-uuid = "1d5cc7b8-4909-519e-a0f8-d0f5ad9712d0"
-version = "2018.0.3+2"
-
 [[InteractiveUtils]]
 deps = ["Markdown"]
 uuid = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
-
-[[Interpolations]]
-deps = ["AxisAlgorithms", "ChainRulesCore", "LinearAlgebra", "OffsetArrays", "Random", "Ratios", "Requires", "SharedArrays", "SparseArrays", "StaticArrays", "WoodburyMatrices"]
-git-tree-sha1 = "b15fc0a95c564ca2e0a7ae12c1f095ca848ceb31"
-uuid = "a98d9a8b-a2ab-59e6-89dd-64a1c18fca59"
-version = "0.13.5"
 
 [[InverseFunctions]]
 deps = ["Test"]
@@ -730,12 +816,6 @@ version = "1.1.0"
 git-tree-sha1 = "7fd44fd4ff43fc60815f8e764c0f352b83c49151"
 uuid = "92d709cd-6900-40b7-9082-c6be49f344b6"
 version = "0.1.1"
-
-[[IterableTables]]
-deps = ["DataValues", "IteratorInterfaceExtensions", "Requires", "TableTraits", "TableTraitsUtils"]
-git-tree-sha1 = "70300b876b2cebde43ebc0df42bc8c94a144e1b4"
-uuid = "1c8ee90f-4401-5389-894e-7a04a3dc0f4d"
-version = "1.0.0"
 
 [[IteratorInterfaceExtensions]]
 git-tree-sha1 = "a3f24677c21f5bbe9d2a714f95dcd58337fb2856"
@@ -754,12 +834,6 @@ git-tree-sha1 = "8076680b162ada2a031f707ac7b4953e30667a37"
 uuid = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
 version = "0.21.2"
 
-[[KernelDensity]]
-deps = ["Distributions", "DocStringExtensions", "FFTW", "Interpolations", "StatsBase"]
-git-tree-sha1 = "591e8dc09ad18386189610acafb970032c519707"
-uuid = "5ab0869b-81aa-558d-bb23-cbf5423bbe9b"
-version = "0.6.3"
-
 [[LAME_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
 git-tree-sha1 = "f6250b16881adf048549549fba48b1161acdac8c"
@@ -771,10 +845,6 @@ deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
 git-tree-sha1 = "e5b909bcf985c5e2605737d2ce278ed791b89be6"
 uuid = "dd4b983a-f0e5-5f8d-a1b7-129d4a5fb1ac"
 version = "2.10.1+0"
-
-[[LazyArtifacts]]
-deps = ["Artifacts", "Pkg"]
-uuid = "4af54fe1-eca0-43a8-85a7-787d91b784e3"
 
 [[LibCURL]]
 deps = ["LibCURL_jll", "MozillaCACerts_jll"]
@@ -850,12 +920,6 @@ version = "0.3.6"
 [[Logging]]
 uuid = "56ddb016-857b-54e1-b83d-db4d58db5568"
 
-[[MKL_jll]]
-deps = ["Artifacts", "IntelOpenMP_jll", "JLLWrappers", "LazyArtifacts", "Libdl", "Pkg"]
-git-tree-sha1 = "5455aef09b40e5020e1520f551fa3135040d4ed0"
-uuid = "856f044c-d86e-5d09-b602-aeab76dc8ba7"
-version = "2021.1.1+2"
-
 [[MacroTools]]
 deps = ["Markdown", "Random"]
 git-tree-sha1 = "3d3e902b31198a27340d0bf00d6ac452866021cf"
@@ -910,25 +974,8 @@ git-tree-sha1 = "f755f36b19a5116bb580de457cda0c140153f283"
 uuid = "77ba4419-2d1f-58cd-9bb1-8ffee604a2e3"
 version = "0.3.6"
 
-[[NearestNeighbors]]
-deps = ["Distances", "StaticArrays"]
-git-tree-sha1 = "16baacfdc8758bc374882566c9187e785e85c2f0"
-uuid = "b8a86587-4115-5ab1-83bc-aa920d37bbce"
-version = "0.4.9"
-
 [[NetworkOptions]]
 uuid = "ca575930-c2e3-43a9-ace4-1e988b2c1908"
-
-[[Observables]]
-git-tree-sha1 = "3469ef96607a6b9a1e89e54e6f23401073ed3126"
-uuid = "510215fc-4207-5dde-b226-833fc4488ee2"
-version = "0.3.3"
-
-[[OffsetArrays]]
-deps = ["Adapt"]
-git-tree-sha1 = "043017e0bdeff61cfbb7afeb558ab29536bbb5ed"
-uuid = "6fe1bfb0-de20-5000-8ca7-80f57d26f881"
-version = "1.10.8"
 
 [[Ogg_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
@@ -976,10 +1023,10 @@ uuid = "2f80f16e-611a-54ab-bc61-aa92de5b98fc"
 version = "8.44.0+0"
 
 [[PDMats]]
-deps = ["LinearAlgebra", "SparseArrays", "SuiteSparse", "Test"]
-git-tree-sha1 = "95a4038d1011dfdbde7cecd2ad0ac411e53ab1bc"
+deps = ["LinearAlgebra", "SparseArrays", "SuiteSparse"]
+git-tree-sha1 = "ee26b350276c51697c9c2d88a072b339f9f03d73"
 uuid = "90014a1f-27ba-587c-ab20-58faa44d9150"
-version = "0.10.1"
+version = "0.11.5"
 
 [[Parameters]]
 deps = ["OrderedCollections", "UnPack"]
@@ -1075,12 +1122,6 @@ git-tree-sha1 = "062986376ce6d394b23d5d90f01d81426113a3c9"
 uuid = "fb686558-2515-59ef-acaa-46db3789a887"
 version = "0.4.3"
 
-[[Ratios]]
-deps = ["Requires"]
-git-tree-sha1 = "01d341f502250e81f6fec0afe662aa861392a3aa"
-uuid = "c84ed2f1-dad5-54f0-aa8e-dbefe2724439"
-version = "0.4.2"
-
 [[RecipesBase]]
 git-tree-sha1 = "b4ed4a7f988ea2340017916f7c9e5d7560b52cae"
 uuid = "3cdcf5f2-1ef4-517c-9805-6587b60abb01"
@@ -1126,6 +1167,11 @@ uuid = "9e88b42a-f829-5b0c-bbe9-9e923198166b"
 deps = ["Distributed", "Mmap", "Random", "Serialization"]
 uuid = "1a1011a3-84de-559e-8e89-a11a2f7dc383"
 
+[[ShiftedArrays]]
+git-tree-sha1 = "22395afdcf37d6709a5a0766cc4a5ca52cb85ea0"
+uuid = "1277b4bf-5013-50f5-be3d-901d8477a67a"
+version = "1.0.0"
+
 [[Showoff]]
 deps = ["Dates", "Grisu"]
 git-tree-sha1 = "ee010d8f103468309b8afac4abb9be2e18ff1182"
@@ -1150,12 +1196,6 @@ deps = ["OpenSpecFun_jll"]
 git-tree-sha1 = "d8d8b8a9f4119829410ecd706da4cc8594a1e020"
 uuid = "276daf66-3868-5448-9aa4-cd146d93841b"
 version = "0.10.3"
-
-[[StatPlots]]
-deps = ["Clustering", "DataStructures", "DataValues", "Distributions", "IterableTables", "KernelDensity", "Observables", "Plots", "RecipesBase", "Reexport", "StatsBase", "TableTraits", "TableTraitsUtils", "Test", "Widgets"]
-git-tree-sha1 = "245c50f8a6534bb16ada031e064363f8298b61b9"
-uuid = "60ddc479-9b66-56df-82fc-76a74619b69c"
-version = "0.9.2"
 
 [[Static]]
 deps = ["IfElse"]
@@ -1190,6 +1230,12 @@ git-tree-sha1 = "ced55fd4bae008a8ea12508314e725df61f0ba45"
 uuid = "4c63d2b9-4356-54db-8cca-17b64c39e42c"
 version = "0.9.7"
 
+[[StatsModels]]
+deps = ["DataAPI", "DataStructures", "LinearAlgebra", "Printf", "REPL", "ShiftedArrays", "SparseArrays", "StatsBase", "StatsFuns", "Tables"]
+git-tree-sha1 = "677488c295051568b0b79a77a8c44aa86e78b359"
+uuid = "3eaba693-59b7-5ba5-a881-562e759f1c8d"
+version = "0.6.28"
+
 [[SuiteSparse]]
 deps = ["Libdl", "LinearAlgebra", "Serialization", "SparseArrays"]
 uuid = "4607b0f0-06f3-5cda-b6b1-a6196a1729e9"
@@ -1220,12 +1266,6 @@ deps = ["IteratorInterfaceExtensions"]
 git-tree-sha1 = "c06b2f539df1c6efa794486abfb6ed2022561a39"
 uuid = "3783bdb8-4a98-5b6b-af9a-565f29a5fe9c"
 version = "1.0.1"
-
-[[TableTraitsUtils]]
-deps = ["DataValues", "IteratorInterfaceExtensions", "Missings", "TableTraits"]
-git-tree-sha1 = "78fecfe140d7abb480b53a44f3f85b6aa373c293"
-uuid = "382cd787-c1b6-5bf2-a167-d5b971a19bda"
-version = "1.0.2"
 
 [[Tables]]
 deps = ["DataAPI", "DataValueInterfaces", "IteratorInterfaceExtensions", "LinearAlgebra", "TableTraits", "Test"]
@@ -1275,18 +1315,6 @@ deps = ["DataAPI", "InlineStrings", "Parsers"]
 git-tree-sha1 = "c69f9da3ff2f4f02e811c3323c22e5dfcb584cfa"
 uuid = "ea10d353-3f73-51f8-a26c-33c1cb351aa5"
 version = "1.4.1"
-
-[[Widgets]]
-deps = ["Colors", "Dates", "Observables", "OrderedCollections"]
-git-tree-sha1 = "80661f59d28714632132c73779f8becc19a113f2"
-uuid = "cc8bc4a8-27d6-5769-a93b-9d913e69aa62"
-version = "0.6.4"
-
-[[WoodburyMatrices]]
-deps = ["LinearAlgebra", "SparseArrays"]
-git-tree-sha1 = "de67fa59e33ad156a590055375a30b23c40299d3"
-uuid = "efce3f68-66dc-5838-9240-27a6d6f5f9b6"
-version = "0.5.5"
 
 [[XML2_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Libiconv_jll", "Pkg", "Zlib_jll"]
@@ -1435,7 +1463,11 @@ version = "3.5.0+0"
 # ╠═be3ca46a-9ac8-484d-a93f-84a6bfaea4ec
 # ╟─97fa1a98-6473-4317-b1bc-b1edf5e76504
 # ╟─4aecaa36-4ebc-4d80-8123-dd6a3087b87a
-# ╠═7a3521c6-7abb-4c6b-a782-2dc05f837e96
+# ╟─7a3521c6-7abb-4c6b-a782-2dc05f837e96
+# ╟─5e93efdb-216a-4483-a222-d6398c3010c6
+# ╠═fe7be177-5e10-4f6c-af39-6442068bc2bc
+# ╟─813e6e2d-39b1-4963-92ff-55f2b9f4c1a8
+# ╟─808ecc62-13bb-4e1e-9307-aa5b5ea1e5d0
 # ╠═4d13d667-01b7-4dd9-abcf-6214b87c26db
 # ╟─3d24ffe4-d5a7-4243-8649-44ef25ab65a2
 # ╠═d6c8df62-2afa-4f6f-9516-cc613a588fbe
@@ -1444,10 +1476,30 @@ version = "3.5.0+0"
 # ╟─6c092a62-c9c3-4e9a-8da7-566098ed1c5d
 # ╟─68dae25b-76da-4ac3-8cc9-2e8a41ddf7ba
 # ╠═a8091427-ac31-4f98-a347-c5ae15645f83
+# ╟─1ecf6a71-4db1-444f-ac08-fd8fa4c9b232
 # ╟─5247b2c1-462e-43ae-80df-e46c2de360b3
-# ╠═afbc14c5-c31c-46e2-b68f-9d9309a2825e
+# ╟─cb63b0a3-b1c2-4115-924d-f6f4ce343fe8
 # ╟─1649eebb-3d07-4327-983f-32311fd0b730
 # ╟─da0f15f3-a18b-41e3-97df-2b0589c72799
+# ╟─bc4db347-df99-4f82-9eb5-7deb234a3c37
+# ╠═4797578a-5007-4717-83f8-faf42fb2dcba
+# ╠═88e3a5a9-4332-4936-aaa7-a20d3304e766
+# ╟─aa646ac8-8f66-4c51-be59-937869942f49
+# ╟─adf4631c-e693-41a6-97cf-71aee3dc4d6a
+# ╠═148fdaa4-872c-474c-8303-98451087ad35
+# ╠═25b36fc0-88a1-4508-a14f-e36807d0bc9c
+# ╟─df9e9389-3450-4ca1-b0cf-d75168e17c4f
+# ╟─d3146239-e036-4629-9df3-0d8bdaf6d360
+# ╠═83562b00-f1a9-4e86-84c4-7a4a7c59ade5
+# ╟─e500e164-40df-4484-9bc9-9e2b03867076
+# ╠═db0ad624-122c-41e1-86b1-fc752d2f49fd
+# ╟─42eb0cd6-842c-44ba-b74f-7dab91bbc3d4
+# ╠═772db893-fa81-4396-96d2-a6559331ca76
+# ╟─af7c2479-9e1c-4154-9b89-66f36c395fbf
+# ╠═0534dc12-569c-42fa-8d67-9d42aa76ca66
+# ╠═7fff987d-1c79-4597-95dc-f6621f09f2ae
+# ╟─a0587b87-9bc3-4228-a64c-93df52d2cad8
+# ╟─cd4b8636-98e6-475a-b44c-b542cd134fd1
 # ╟─2c7a1446-94f6-4844-a8c3-2dc9af345592
 # ╟─df82d32c-c21c-4e57-a271-73de74bd71ab
 # ╠═13b7c0f0-d2ad-4582-be41-1e35858c2236
