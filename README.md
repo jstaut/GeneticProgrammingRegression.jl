@@ -2,7 +2,7 @@
 Project 3 of the STMO course
 
 ## Introduction
-In this project I will analyze a personal data set, using the package `SymbolicRegression` that takes a genetic programming approach to perform regression.
+In this project I will analyze a personal data set, using the package `SymbolicRegression` that takes a genetic programming approach to perform regression. A goal of this project is to compare the genetic programming approach with classical linear regression.
 
 ### Data set
 
